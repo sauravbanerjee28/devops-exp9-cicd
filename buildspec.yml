@@ -1,0 +1,36 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - pip install pytest flake8
+
+  pre_build:
+    commands:
+      - echo "Running lint checks"
+      - flake8 app.py test_app.py
+      - echo "Running unit tests"
+      - python -m pytest -v
+      - IMAGE_TAG="$CODEBUILD_RESOLVED_SOURCE_VERSION"
+      - REGISTRY="${ECR_URI%%/*}"
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+
+  build:
+    commands:
+      - docker build -t "$ECR_URI:$IMAGE_TAG" .
+
+  post_build:
+    commands:
+      - |
+        if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then
+          echo "Build failed; image publication blocked."
+          exit 1
+        fi
+      - docker push "$ECR_URI:$IMAGE_TAG"
+      - printf '{"imageUri":"%s"}\n' "$ECR_URI:$IMAGE_TAG" > imageDetail.json
+
+artifacts:
+  files:
+    - imageDetail.json
